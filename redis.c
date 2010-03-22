@@ -1650,7 +1650,11 @@ static void loadServerConfig(char *filename) {
             }
         } else if (!strcasecmp(argv[0],"port") && argc == 2) {
             server.port = atoi(argv[1]);
+#ifdef UNIX_SOCKET_PATCH    
+            if (server.port < 0 || server.port > 65535) {
+#else
             if (server.port < 1 || server.port > 65535) {
+#endif                
                 err = "Invalid port"; goto loaderr;
             }
         } else if (!strcasecmp(argv[0],"bind") && argc == 2) {

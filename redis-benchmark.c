@@ -412,6 +412,9 @@ static void endBenchmark(char *title) {
 
 void parseOptions(int argc, char **argv) {
     int i;
+#ifdef UNIX_SOCKET_PATCH
+    char* hostname = NULL;
+#endif
 
     for (i = 1; i < argc; i++) {
         int lastarg = i==argc-1;
@@ -426,12 +429,16 @@ void parseOptions(int argc, char **argv) {
             config.keepalive = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-h") && !lastarg) {
+#ifdef UNIX_SOCKET_PATCH
+            hostname = argv[i+1];
+#else            
             char *ip = zmalloc(32);
             if (anetResolve(NULL,argv[i+1],ip) == ANET_ERR) {
                 printf("Can't resolve %s\n", argv[i]);
                 exit(1);
             }
             config.hostip = ip;
+#endif            
             i++;
         } else if (!strcmp(argv[i],"-p") && !lastarg) {
             config.hostport = atoi(argv[i+1]);
@@ -478,6 +485,21 @@ void parseOptions(int argc, char **argv) {
             exit(1);
         }
     }
+    
+#ifdef UNIX_SOCKET_PATCH
+    if (hostname != NULL) {
+		if (config.hostport == 0) {
+			config.hostip = hostname;
+		} else {
+            char *ip = zmalloc(32);
+            if (anetResolve(NULL,argv[i+1],ip) == ANET_ERR) {
+                printf("Can't resolve %s\n", argv[i]);
+                exit(1);
+            }
+            config.hostip = ip;
+		}
+	}
+#endif    
 }
 
 int main(int argc, char **argv) {

@@ -129,15 +129,53 @@ static int anetTcpGenericConnect(char *err, char *addr, int port, int flags)
 {
     int s, on = 1;
     struct sockaddr_in sa;
-
+#ifdef UNIX_SOCKET_PATCH
+	struct sockaddr_un su;
+	struct sockaddr* ps;
+	size_t pn;
+	int type;
+	
+	if (port == 0) {
+		type = AF_UNIX;
+	} else {
+		type = AF_INET;
+	}    
+    
+    if ((s = socket(type, SOCK_STREAM, 0)) == -1) {
+#else    
     if ((s = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+#endif
         anetSetError(err, "creating socket: %s\n", strerror(errno));
         return ANET_ERR;
     }
     /* Make sure connection-intensive things like the redis benckmark
      * will be able to close/open sockets a zillion of times */
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-
+#ifdef UNIX_SOCKET_PATCH
+	if (type == AF_INET) {
+		memset(&sa,0,sizeof(sa));
+		sa.sin_family = AF_INET;
+		sa.sin_port = htons(port);
+		if (inet_aton(addr, &sa.sin_addr) == 0) {
+			struct hostent *he;
+			he = gethostbyname(addr);
+			if (he == NULL) {
+				anetSetError(err, "can't resolve: %s\n", addr);
+				close(s);
+				return ANET_ERR;
+			}
+			memcpy(&sa.sin_addr, he->h_addr, sizeof(struct in_addr));
+		}
+		ps = (struct sockaddr*)(&sa);	
+		pn = sizeof(sa);
+	} else {
+		memset(&su,0,sizeof(su));
+		su.sun_family = AF_UNIX;
+		strncpy(su.sun_path, addr, sizeof(su.sun_path));
+		ps = (struct sockaddr*)(&su);	
+		pn = sizeof(su);
+	}            
+#else
     sa.sin_family = AF_INET;
     sa.sin_port = htons(port);
     if (inet_aton(addr, &sa.sin_addr) == 0) {
@@ -151,11 +189,16 @@ static int anetTcpGenericConnect(char *err, char *addr, int port, int flags)
         }
         memcpy(&sa.sin_addr, he->h_addr, sizeof(struct in_addr));
     }
+#endif        
     if (flags & ANET_CONNECT_NONBLOCK) {
         if (anetNonBlock(err,s) != ANET_OK)
             return ANET_ERR;
     }
+#ifdef UNIX_SOCKET_PATCH
+    if (connect(s, ps, pn) == -1) {
+#else    
     if (connect(s, (struct sockaddr*)&sa, sizeof(sa)) == -1) {
+#endif        
         if (errno == EINPROGRESS &&
             flags & ANET_CONNECT_NONBLOCK)
             return s;
@@ -212,7 +255,22 @@ int anetTcpServer(char *err, int port, char *bindaddr)
     int s, on = 1;
     struct sockaddr_in sa;
     
+#ifdef UNIX_SOCKET_PATCH
+	struct sockaddr_un su;	
+	struct sockaddr* ps;
+	size_t pn;
+    int type;
+	
+	if (port==0) {
+		type = AF_UNIX;
+	} else {
+		type = AF_INET;
+	}
+	
+    if ((s = socket(type, SOCK_STREAM, 0)) == -1) {
+#else    
     if ((s = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+#endif        
         anetSetError(err, "socket: %s\n", strerror(errno));
         return ANET_ERR;
     }
@@ -221,6 +279,30 @@ int anetTcpServer(char *err, int port, char *bindaddr)
         close(s);
         return ANET_ERR;
     }
+#ifdef UNIX_SOCKET_PATCH
+	if (type == AF_INET) {
+		memset(&sa,0,sizeof(sa));
+		sa.sin_family = AF_INET;
+		sa.sin_port = htons(port);
+		sa.sin_addr.s_addr = htonl(INADDR_ANY);
+		if (bindaddr) {
+			if (inet_aton(bindaddr, &sa.sin_addr) == 0) {
+				anetSetError(err, "Invalid bind address\n");
+				close(s);
+				return ANET_ERR;
+			}
+		}
+		ps = (struct sockaddr*)(&sa);
+		pn = sizeof(sa);
+	} else {
+		memset(&su,0,sizeof(su));
+		su.sun_family = AF_UNIX;
+		strncpy(su.sun_path, bindaddr, sizeof(su.sun_path));
+		ps = (struct sockaddr*)(&su);
+		pn = sizeof(su);
+	}
+    if (bind(s, ps, pn) == -1) {
+#else    
     memset(&sa,0,sizeof(sa));
     sa.sin_family = AF_INET;
     sa.sin_port = htons(port);
@@ -233,6 +315,7 @@ int anetTcpServer(char *err, int port, char *bindaddr)
         }
     }
     if (bind(s, (struct sockaddr*)&sa, sizeof(sa)) == -1) {
+#endif    
         anetSetError(err, "bind: %s\n", strerror(errno));
         close(s);
         return ANET_ERR;
